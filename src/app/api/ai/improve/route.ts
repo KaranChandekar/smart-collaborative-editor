@@ -9,6 +9,7 @@ export async function POST(req: Request) {
     tone: `Improve the tone of this text to be more professional and clear. Return only the improved text:\n\n${text}`,
     clarity: `Rewrite this text to be clearer and more concise. Return only the improved text:\n\n${text}`,
     shorten: `Shorten this text while keeping the key points. Return only the shortened text:\n\n${text}`,
+    summarize: `Summarize the following text into a concise overview with key points. Return only the summary:\n\n${text}`,
   };
 
   const { text: improved } = await generateText({

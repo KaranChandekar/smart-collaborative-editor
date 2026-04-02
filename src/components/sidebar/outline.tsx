@@ -72,8 +72,11 @@ export function Outline({ editor }: OutlineProps) {
             <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-muted mb-3">
               <FileText className="h-6 w-6 text-muted-foreground" />
             </div>
-            <p className="text-sm text-muted-foreground">
-              Add headings to see the outline.
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Start adding headings (H1, H2, H3) to build your document outline.
+            </p>
+            <p className="text-xs text-muted-foreground/60 mt-1">
+              Type <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[10px]">/</kbd> to see available blocks
             </p>
           </div>
         ) : (

@@ -36,7 +36,7 @@ interface SlashCommandMenuProps {
 const commands: SlashCommandItem[] = [
   {
     title: "AI Write",
-    description: "Let AI continue writing",
+    description: "Continue writing from cursor position",
     icon: Sparkles,
     category: "AI",
     iconColor: "text-violet-500 bg-violet-100 dark:bg-violet-950",
@@ -44,7 +44,7 @@ const commands: SlashCommandItem[] = [
   },
   {
     title: "AI Improve",
-    description: "Improve grammar and clarity",
+    description: "Fix grammar and improve clarity of your text",
     icon: Wand2,
     category: "AI",
     iconColor: "text-fuchsia-500 bg-fuchsia-100 dark:bg-fuchsia-950",
@@ -52,7 +52,7 @@ const commands: SlashCommandItem[] = [
   },
   {
     title: "AI Expand",
-    description: "Expand on the text",
+    description: "Add more detail and explanation",
     icon: Expand,
     category: "AI",
     iconColor: "text-cyan-500 bg-cyan-100 dark:bg-cyan-950",
@@ -60,7 +60,7 @@ const commands: SlashCommandItem[] = [
   },
   {
     title: "AI Summarize",
-    description: "Summarize the document",
+    description: "Create a concise summary of the document",
     icon: FileText,
     category: "AI",
     iconColor: "text-amber-500 bg-amber-100 dark:bg-amber-950",
@@ -165,6 +165,7 @@ export function SlashCommandMenu({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
+  const slashPosRef = useRef<number>(0);
 
   const filteredCommands = commands.filter(
     (cmd) =>
@@ -174,21 +175,18 @@ export function SlashCommandMenu({
 
   const executeCommand = useCallback(
     (command: SlashCommandItem) => {
+      // Delete the "/" and query text using the stored slash position
       const { from } = editor.state.selection;
-      const textBefore = editor.state.doc.textBetween(
-        Math.max(0, from - query.length - 1),
-        from,
-        "\n"
-      );
-      const slashPos = textBefore.lastIndexOf("/");
-      if (slashPos >= 0) {
-        const deleteFrom = from - query.length - 1;
-        editor
-          .chain()
-          .focus()
-          .deleteRange({ from: deleteFrom, to: from })
-          .run();
+      const deleteFrom = slashPosRef.current;
+      const deleteTo = from;
+
+      if (deleteFrom < deleteTo) {
+        editor.chain().focus().deleteRange({ from: deleteFrom, to: deleteTo }).run();
       }
+
+      // After deletion, check if the block is now empty and join backward
+      const resolvedPos = editor.state.doc.resolve(editor.state.selection.from);
+      const isBlockEmpty = resolvedPos.parent.content.size === 0;
 
       if (command.category === "AI") {
         const actionMap: Record<string, string> = {
@@ -197,15 +195,26 @@ export function SlashCommandMenu({
           "AI Expand": "expand",
           "AI Summarize": "summarize",
         };
+
+        // If the block is empty after deleting the slash, join with previous to avoid empty line
+        if (isBlockEmpty && resolvedPos.depth > 0) {
+          try {
+            editor.commands.joinBackward();
+          } catch {
+            // joinBackward may fail if at start of doc, that's fine
+          }
+        }
+
         onAIAction(actionMap[command.title] || "complete");
       } else {
+        // For block commands, if the block is empty, run the action directly (it will transform the empty block)
         command.action(editor);
       }
 
       setIsOpen(false);
       setQuery("");
     },
-    [editor, query, onAIAction]
+    [editor, onAIAction]
   );
 
   useEffect(() => {
@@ -254,6 +263,9 @@ export function SlashCommandMenu({
         setQuery(slashMatch[1]);
         setIsOpen(true);
         setSelectedIndex(0);
+
+        // Store the absolute position of the "/" in the document
+        slashPosRef.current = from - slashMatch[0].length;
 
         const coords = editor.view.coordsAtPos(from);
         const editorRect = editor.view.dom.getBoundingClientRect();

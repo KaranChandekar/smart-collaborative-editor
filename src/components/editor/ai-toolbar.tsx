@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { Editor } from "@tiptap/react";
 import {
   Sparkles,
@@ -24,39 +24,46 @@ export function AIToolbar({ editor }: AIToolbarProps) {
   const [result, setResult] = useState("");
   const [selectedText, setSelectedText] = useState("");
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const showTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const selectionRangeRef = useRef<{ from: number; to: number }>({
+    from: 0,
+    to: 0,
+  });
 
   useEffect(() => {
     if (!editor) return;
 
     const handleSelectionUpdate = () => {
       const { from, to } = editor.state.selection;
-      const text = editor.state.doc.textBetween(from, to, " ");
+      const text = editor.state.doc.textBetween(from, to, "\n");
+
+      clearTimeout(showTimer.current);
 
       if (text.length > 3) {
-        setSelectedText(text);
-        setIsVisible(true);
-        setResult("");
+        showTimer.current = setTimeout(() => {
+          setSelectedText(text);
+          selectionRangeRef.current = { from, to };
+          setIsVisible(true);
+          setResult("");
 
-        const coordsStart = editor.view.coordsAtPos(from);
-        const coordsEnd = editor.view.coordsAtPos(to);
-        const editorWrapper = editor.view.dom.closest(".editor-wrapper");
-        const editorRect = editorWrapper?.getBoundingClientRect();
-        if (editorRect) {
-          const toolbarHeight = 48;
-          // Position above selection by default
-          let top = coordsStart.top - editorRect.top - toolbarHeight;
+          const coordsStart = editor.view.coordsAtPos(from);
+          const coordsEnd = editor.view.coordsAtPos(to);
+          const editorWrapper = editor.view.dom.closest(".editor-wrapper");
+          const editorRect = editorWrapper?.getBoundingClientRect();
+          if (editorRect) {
+            const toolbarHeight = 48;
+            let top = coordsStart.top - editorRect.top - toolbarHeight;
 
-          // If toolbar would be hidden behind the sticky header (~100px from viewport top),
-          // position it below the selection instead
-          if (coordsStart.top - toolbarHeight < 100) {
-            top = coordsEnd.bottom - editorRect.top + 8;
+            if (coordsStart.top - toolbarHeight < 100) {
+              top = coordsEnd.bottom - editorRect.top + 8;
+            }
+
+            setPosition({
+              top,
+              left: Math.max(0, coordsStart.left - editorRect.left),
+            });
           }
-
-          setPosition({
-            top,
-            left: Math.max(0, coordsStart.left - editorRect.left),
-          });
-        }
+        }, 150);
       } else {
         setIsVisible(false);
         setResult("");
@@ -66,6 +73,7 @@ export function AIToolbar({ editor }: AIToolbarProps) {
     editor.on("selectionUpdate", handleSelectionUpdate);
     return () => {
       editor.off("selectionUpdate", handleSelectionUpdate);
+      clearTimeout(showTimer.current);
     };
   }, [editor]);
 
@@ -91,7 +99,7 @@ export function AIToolbar({ editor }: AIToolbarProps) {
         const data = await res.json();
         setResult(data.improved || data.expanded || "");
       } catch {
-        setResult("Failed to get AI response");
+        setResult("Failed to get AI response. Please try again.");
       } finally {
         setIsLoading(false);
       }
@@ -102,7 +110,7 @@ export function AIToolbar({ editor }: AIToolbarProps) {
   const applyResult = useCallback(() => {
     if (!result || !editor) return;
 
-    const { from, to } = editor.state.selection;
+    const { from, to } = selectionRangeRef.current;
     editor
       .chain()
       .focus()
