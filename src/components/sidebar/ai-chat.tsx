@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { Editor } from "@tiptap/react";
@@ -16,33 +16,57 @@ interface AIChatProps {
 export function AIChat({ editor }: AIChatProps) {
   const [inputValue, setInputValue] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<Editor | null>(editor);
 
-  const documentContent = editor?.getText() || "";
+  // Keep editor ref in sync without recreating transport
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
+
+  // Create transport once - use ref for dynamic document content
   const transport = useMemo(
     () =>
       new DefaultChatTransport({
         api: "/api/ai/chat",
-        body: { documentContent },
+        body: () => ({
+          documentContent: editorRef.current?.getText() || "",
+        }),
       }),
-    [documentContent]
+    []
   );
 
   const { messages, sendMessage, status } = useChat({ transport });
 
   const isLoading = status === "streaming" || status === "submitted";
 
+  // Scroll to bottom when messages change
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (!scrollRef.current) return;
+    const viewport = scrollRef.current.querySelector(
+      "[data-slot='scroll-area-viewport']"
+    );
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
     }
   }, [messages]);
 
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
-    sendMessage({ text: inputValue });
-    setInputValue("");
-  };
+  const onSubmit = useCallback(
+    (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!inputValue.trim() || isLoading) return;
+      sendMessage({ text: inputValue });
+      setInputValue("");
+    },
+    [inputValue, isLoading, sendMessage]
+  );
+
+  const handleQuickPrompt = useCallback(
+    (prompt: string) => {
+      if (isLoading) return;
+      sendMessage({ text: prompt });
+    },
+    [isLoading, sendMessage]
+  );
 
   const getMessageText = (message: (typeof messages)[number]): string => {
     if (Array.isArray(message.parts)) {
@@ -81,7 +105,7 @@ export function AIChat({ editor }: AIChatProps) {
                 <button
                   key={prompt}
                   className="w-full text-left text-sm px-3 py-2.5 rounded-lg border border-border/60 hover:bg-violet-50 hover:border-violet-200 dark:hover:bg-violet-950 dark:hover:border-violet-800 transition-all"
-                  onClick={() => setInputValue(prompt)}
+                  onClick={() => handleQuickPrompt(prompt)}
                 >
                   {prompt}
                 </button>
@@ -131,7 +155,7 @@ export function AIChat({ editor }: AIChatProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                onSubmit(e);
+                onSubmit();
               }
             }}
           />

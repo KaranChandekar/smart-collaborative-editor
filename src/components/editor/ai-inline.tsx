@@ -9,16 +9,16 @@ interface AIInlineProps {
 
 export function AIInline({ editor }: AIInlineProps) {
   const [suggestion, setSuggestion] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const isLoadingRef = useRef(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastText = useRef("");
   const decorationRef = useRef<HTMLSpanElement | null>(null);
 
   const fetchSuggestion = useCallback(
     async (context: string) => {
-      if (context.length < 20 || isLoading) return;
+      if (context.length < 20 || isLoadingRef.current) return;
 
-      setIsLoading(true);
+      isLoadingRef.current = true;
       try {
         const res = await fetch("/api/ai/complete", {
           method: "POST",
@@ -30,12 +30,12 @@ export function AIInline({ editor }: AIInlineProps) {
           setSuggestion(data.suggestion);
         }
       } catch {
-        // Silently fail
+        // Silently fail for inline suggestions
       } finally {
-        setIsLoading(false);
+        isLoadingRef.current = false;
       }
     },
-    [isLoading]
+    []
   );
 
   const acceptSuggestion = useCallback(() => {
@@ -51,8 +51,18 @@ export function AIInline({ editor }: AIInlineProps) {
       if (event.key === "Tab" && suggestion) {
         event.preventDefault();
         acceptSuggestion();
-      } else if (suggestion && event.key !== "Shift" && event.key !== "Control" && event.key !== "Alt" && event.key !== "Meta") {
-        // Dismiss suggestion on any other key
+      } else if (
+        suggestion &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !event.metaKey &&
+        event.key !== "Shift" &&
+        event.key !== "Control" &&
+        event.key !== "Alt" &&
+        event.key !== "Meta"
+      ) {
+        // Dismiss suggestion on any printable/action key
         setSuggestion("");
       }
     };
@@ -103,7 +113,7 @@ export function AIInline({ editor }: AIInlineProps) {
     };
   }, [editor, fetchSuggestion]);
 
-  // Render ghost text after cursor
+  // Render ghost text inline at cursor position
   useEffect(() => {
     if (!editor || !suggestion) {
       if (decorationRef.current) {
@@ -116,28 +126,53 @@ export function AIInline({ editor }: AIInlineProps) {
     // Remove old decoration
     if (decorationRef.current) {
       decorationRef.current.remove();
+      decorationRef.current = null;
     }
 
     const { from } = editor.state.selection;
-    const coords = editor.view.coordsAtPos(from);
-    const editorDom = editor.view.dom;
-    const editorRect = editorDom.getBoundingClientRect();
 
-    const ghost = document.createElement("span");
-    ghost.textContent = suggestion;
-    ghost.className = "pointer-events-none text-muted-foreground/50 italic";
-    ghost.style.position = "absolute";
-    ghost.style.top = `${coords.top - editorRect.top}px`;
-    ghost.style.left = `${coords.left - editorRect.left}px`;
-    ghost.style.fontSize = "inherit";
-    ghost.style.lineHeight = "inherit";
-    ghost.style.whiteSpace = "pre";
+    try {
+      // Get the DOM position at the cursor
+      const domPos = editor.view.domAtPos(from);
+      const node = domPos.node;
+      const offset = domPos.offset;
 
-    const parent = editorDom.parentElement;
-    if (parent) {
-      parent.style.position = "relative";
-      parent.appendChild(ghost);
+      const ghost = document.createElement("span");
+      ghost.textContent = suggestion;
+      ghost.className = "ai-ghost-suggestion";
+      ghost.style.color = "var(--color-muted-foreground)";
+      ghost.style.opacity = "0.45";
+      ghost.style.fontStyle = "italic";
+      ghost.style.pointerEvents = "none";
+      ghost.style.userSelect = "none";
+      ghost.style.whiteSpace = "pre-wrap";
+      ghost.style.wordBreak = "break-word";
+      ghost.setAttribute("data-ghost", "true");
+
+      // Insert the ghost span inline after the cursor's DOM position
+      if (node.nodeType === Node.TEXT_NODE) {
+        // Cursor is inside a text node - insert after the text node
+        const parent = node.parentNode;
+        if (parent) {
+          if (node.nextSibling) {
+            parent.insertBefore(ghost, node.nextSibling);
+          } else {
+            parent.appendChild(ghost);
+          }
+        }
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        // Cursor is at an element boundary
+        const element = node as HTMLElement;
+        if (offset < element.childNodes.length) {
+          element.insertBefore(ghost, element.childNodes[offset]);
+        } else {
+          element.appendChild(ghost);
+        }
+      }
+
       decorationRef.current = ghost;
+    } catch {
+      // If DOM manipulation fails, clean up silently
     }
 
     return () => {
@@ -151,10 +186,10 @@ export function AIInline({ editor }: AIInlineProps) {
   if (!suggestion) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 animate-in fade-in slide-in-from-bottom-2">
-      <div className="flex items-center gap-2 rounded-lg border bg-popover px-3 py-2 text-sm shadow-lg">
-        <span className="text-muted-foreground">AI suggestion ready</span>
-        <kbd className="rounded border bg-muted px-1.5 py-0.5 text-xs font-mono">
+    <div className="fixed bottom-12 right-4 z-50 animate-in fade-in slide-in-from-bottom-2">
+      <div className="flex items-center gap-2 rounded-lg border bg-popover px-3 py-1.5 text-xs shadow-lg">
+        <span className="text-muted-foreground">AI suggestion</span>
+        <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
           Tab
         </kbd>
         <span className="text-muted-foreground">to accept</span>

@@ -1,4 +1,4 @@
-import { streamText } from "ai";
+import { streamText, convertToModelMessages } from "ai";
 import { aiModel } from "@/lib/ai";
 
 export async function POST(req: Request) {
@@ -13,8 +13,8 @@ ${documentContent}
 ---
 
 Help them with questions about the document, suggest improvements, brainstorm ideas, or help with any writing task. Be concise and helpful.`,
-    messages,
+    messages: await convertToModelMessages(messages),
   });
 
-  return result.toTextStreamResponse();
+  return result.toUIMessageStreamResponse();
 }

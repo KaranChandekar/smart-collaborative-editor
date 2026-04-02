@@ -3,6 +3,7 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import { createEditorExtensions } from "@/lib/editor-config";
 import { createCollaborationProvider } from "@/lib/collaboration";
 import type { CollaborationProvider } from "@/lib/collaboration";
@@ -34,6 +35,7 @@ import {
   Sparkles,
   Loader2,
   PanelRightClose,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -98,6 +100,8 @@ function EditorInner({
   const [title, setTitle] = useState(initialTitle || "Untitled");
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [aiActionLoading, setAiActionLoading] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const editor = useEditor({
     extensions: createEditorExtensions(
@@ -139,13 +143,27 @@ function EditorInner({
     setTimeout(() => setCopied(false), 2000);
   }, [shareUrl]);
 
+  const cancelAIAction = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setAiActionLoading(false);
+    toast.info("AI action cancelled");
+  }, []);
+
   const handleAIAction = useCallback(
     async (action: string) => {
       if (!editor) return;
 
       const text = editor.getText();
       const { from, to } = editor.state.selection;
-      const selectedText = editor.state.doc.textBetween(from, to, " ");
+      const selectedText = editor.state.doc.textBetween(from, to, "\n");
+
+      // Abort any in-flight request
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      setAiActionLoading(true);
 
       try {
         if (action === "complete") {
@@ -153,17 +171,20 @@ function EditorInner({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ context: text.slice(-500) }),
+            signal: controller.signal,
           });
           const data = await res.json();
           if (data.suggestion) {
             editor.chain().focus().insertContent(data.suggestion).run();
+            toast.success("AI text generated");
           }
         } else if (action === "improve" || action === "summarize") {
-          const mode = action === "summarize" ? "clarity" : "grammar";
+          const mode = action === "summarize" ? "summarize" : "grammar";
           const res = await fetch("/api/ai/improve", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: selectedText || text, mode }),
+            signal: controller.signal,
           });
           const data = await res.json();
           if (data.improved) {
@@ -181,12 +202,18 @@ function EditorInner({
                 .insertContent("\n\n" + data.improved)
                 .run();
             }
+            toast.success(
+              action === "summarize"
+                ? "Summary generated"
+                : "Text improved"
+            );
           }
         } else if (action === "expand") {
           const res = await fetch("/api/ai/expand", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: selectedText || text }),
+            signal: controller.signal,
           });
           const data = await res.json();
           if (data.expanded) {
@@ -204,10 +231,16 @@ function EditorInner({
                 .insertContent("\n\n" + data.expanded)
                 .run();
             }
+            toast.success("Text expanded");
           }
         }
-      } catch {
-        // Silently fail
+      } catch (err) {
+        if ((err as Error).name !== "AbortError") {
+          toast.error("AI request failed. Please try again.");
+        }
+      } finally {
+        setAiActionLoading(false);
+        abortControllerRef.current = null;
       }
     },
     [editor]
@@ -360,6 +393,25 @@ function EditorInner({
 
       {/* Toolbar */}
       <Toolbar editor={editor} />
+
+      {/* AI Loading Bar */}
+      {aiActionLoading && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-violet-50 dark:bg-violet-950/50 border-b border-violet-200 dark:border-violet-800">
+          <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
+          <span className="text-sm text-violet-700 dark:text-violet-300">
+            AI is working...
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs text-violet-600 dark:text-violet-400 hover:text-violet-800"
+            onClick={cancelAIAction}
+          >
+            <X className="h-3 w-3 mr-1" />
+            Cancel
+          </Button>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
